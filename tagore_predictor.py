@@ -56,8 +56,7 @@ def load_tagore_corpus(filepath="tagore_gitanjali.txt"):
 # -------------------------------------------------------------------
 def preprocess_corpus(text):
     """
-    Cleans corpus text while keeping punctuation and stop words intact 
-    for sequence language modeling.
+    Cleans corpus text while keeping punctuation intact for language modeling.
     """
     text = text.lower()
     text = re.sub(r'\s+', ' ', text)
@@ -121,15 +120,31 @@ def predict_next_words(history_tokens, model, n=3, top_k=5):
     return []
 
 # -------------------------------------------------------------------
-# 5. Multi-Sentence Generation & Probability Ranking
+# 5. Fixed Multi-Sentence Generation (Stops Cleanly at 1 Sentence)
 # -------------------------------------------------------------------
-def generate_sentence_from_branch(initial_tokens, initial_prob, model, n=3, max_length=15):
+def generate_sentence_from_branch(initial_tokens, initial_prob, model, n=3, max_length=20):
     """
-    Generates a sentence along a specific candidate branch and calculates sequence probability.
+    Generates a sentence along a specific candidate branch and stops immediately 
+    when a single sentence is completed.
     """
     tokens = list(initial_tokens)
     cum_prob = initial_prob
 
+    # 1. Check if the initial branch word itself is already a sentence terminator
+    if tokens[-1] in {'.', '!', '?'}:
+        # Check if a closing quote follows the period
+        history_key = tuple(tokens[-(n - 1):])
+        if history_key in model:
+            next_cand = sorted(model[history_key].items(), key=lambda x: x[1], reverse=True)
+            if next_cand and next_cand[0][0] in {'”', '"', "''", '’'}:
+                tokens.append(next_cand[0][0])
+                cum_prob *= next_cand[0][1]
+
+        sentence_str = " ".join(tokens)
+        sentence_str = re.sub(r'\s+([.,!?;:])', r'\1', sentence_str)
+        return sentence_str.capitalize(), cum_prob
+
+    # 2. Otherwise, keep generating until a sentence terminator is met
     for _ in range(max_length - len(tokens)):
         history_key = tuple(tokens[-(n - 1):])
 
@@ -144,14 +159,22 @@ def generate_sentence_from_branch(initial_tokens, initial_prob, model, n=3, max_
         tokens.append(best_next_word)
         cum_prob *= prob
 
+        # Stop if sentence-ending punctuation is reached
         if best_next_word in {'.', '!', '?'}:
+            # Optionally check if the very next word is a closing quote
+            next_history = tuple(tokens[-(n - 1):])
+            if next_history in model:
+                next_cand = sorted(model[next_history].items(), key=lambda x: x[1], reverse=True)
+                if next_cand and next_cand[0][0] in {'”', '"', "''", '’'}:
+                    tokens.append(next_cand[0][0])
+                    cum_prob *= next_cand[0][1]
             break
 
     sentence_str = " ".join(tokens)
     sentence_str = re.sub(r'\s+([.,!?;:])', r'\1', sentence_str)
     return sentence_str.capitalize(), cum_prob
 
-def predict_multiple_sentences(seed_text, model, n=3, max_length=15, num_suggestions=3):
+def predict_multiple_sentences(seed_text, model, n=3, max_length=20, num_suggestions=3):
     """
     Generates multiple sentence completions and sorts them by total probability.
     """
@@ -211,7 +234,7 @@ if __name__ == "__main__":
 
         print("\n--- Predicted Sentences (Sorted by Probability) ---")
         ranked_sentences = predict_multiple_sentences(
-            user_input, model, n=N_GRAM_SIZE, max_length=15, num_suggestions=3
+            user_input, model, n=N_GRAM_SIZE, max_length=20, num_suggestions=3
         )
 
         for idx, (sentence, prob) in enumerate(ranked_sentences, start=1):
